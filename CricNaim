@@ -3,23 +3,169 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ClipByNaim</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-
-<h1>ClipByNaim</h1>
-<p>Stream Player + Recorder</p>
-
-<input type="text" id="url" placeholder="Paste m3u8 link here">
-<br>
-<button id="playBtn">▶ PLAY STREAM</button>
-<button id="recBtn">⏺ RECORD</button>
-
-<video id="video" controls></video>
+<title>ClipByNaim Pro Live Recorder</title>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-<script src="script.js"></script>
+
+<style>
+body {
+  margin:0;
+  background: linear-gradient(160deg,#0f2027,#203a43,#2c5364);
+  font-family: Arial;
+  color:#fff;
+  text-align:center;
+  padding:15px;
+}
+h2 { color:#00ffe7; }
+input,button {
+  width:95%;
+  padding:16px;
+  margin:8px 0;
+  border-radius:12px;
+  border:none;
+  font-size:16px;
+}
+button { font-weight:bold; }
+#playBtn { background:#1fddff; }
+#recBtn { background:#ff4b1f; color:#fff; }
+#stopBtn { background:#eee; }
+video {
+  width:100%;
+  border-radius:14px;
+  margin-top:12px;
+  background:#000;
+}
+#msg { color:#00ffe7; }
+</style>
+</head>
+
+<body>
+
+<h2>ClipByNaim – Background Recorder</h2>
+
+<input id="link" placeholder="Paste LIVE .m3u8 link">
+<button id="playBtn">▶ PLAY</button>
+<button id="recBtn">● REC</button>
+<button id="stopBtn">■ STOP & SAVE</button>
+
+<video id="v" controls playsinline autoplay muted></video>
+<p id="msg"></p>
+
+<script>
+const v = document.getElementById("v");
+const link = document.getElementById("link");
+const msg = document.getElementById("msg");
+const playBtn = document.getElementById("playBtn");
+const recBtn = document.getElementById("recBtn");
+const stopBtn = document.getElementById("stopBtn");
+
+let hls;
+let recorder;
+let chunks = [];
+let wakeLock = null;
+
+// -------- PLAY LIVE --------
+playBtn.onclick = () => {
+  const url = link.value.trim();
+  if (!url) return alert("Paste link");
+
+  if (hls) hls.destroy();
+
+  if (Hls.isSupported()) {
+    hls = new Hls({
+      lowLatencyMode: true,
+      maxBufferLength: 10,
+      backBufferLength: 3
+    });
+    hls.loadSource(url);
+    hls.attachMedia(v);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => v.play());
+  } else {
+    v.src = url;
+    v.play();
+  }
+
+  v.muted = false;
+  msg.innerText = "Live playing smooth";
+};
+
+// -------- WAKE LOCK --------
+async function keepAwake() {
+  try {
+    if ("wakeLock" in navigator) {
+      wakeLock = await navigator.wakeLock.request("screen");
+    }
+  } catch(e){}
+}
+
+document.addEventListener("visibilitychange", async () => {
+  if (wakeLock && document.visibilityState === "visible") {
+    wakeLock = await navigator.wakeLock.request("screen");
+  }
+});
+
+// -------- RECORD --------
+recBtn.onclick = async () => {
+
+  if (!v.captureStream) {
+    alert("Recording not supported");
+    return;
+  }
+
+  await keepAwake();
+
+  chunks = [];
+
+  // lower FPS = less lag background
+  const stream = v.captureStream(20);
+
+  let opt = { videoBitsPerSecond: 900000 };
+
+  if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) {
+    opt.mimeType = "video/webm;codecs=vp8";
+  }
+
+  recorder = new MediaRecorder(stream, opt);
+
+  recorder.ondataavailable = e => {
+    if (e.data.size) chunks.push(e.data);
+  };
+
+  recorder.start(1000); // small chunks
+
+  msg.innerText = "🔴 Background-safe recording...";
+};
+
+// -------- STOP --------
+stopBtn.onclick = () => {
+
+  if (!recorder) return;
+
+  recorder.stop();
+
+  if (wakeLock) {
+    wakeLock.release();
+    wakeLock = null;
+  }
+
+  const blob = new Blob(chunks, { type: "video/webm" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "background_record.webm";
+  a.click();
+
+  msg.innerText = "✅ Saved";
+};
+
+// -------- AUTO RESUME VIDEO --------
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && v.paused) {
+    v.play().catch(()=>{});
+  }
+});
+</script>
 
 </body>
 </html>
